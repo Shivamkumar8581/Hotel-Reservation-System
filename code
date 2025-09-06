@@ -1,0 +1,283 @@
+
+/*
+ * Hotel Reservation System - Simple C implementation
+ * Features:
+ *  - Add rooms (admin)
+ *  - View all rooms
+ *  - Book a room
+ *  - Cancel booking
+ *  - View booked rooms
+ *  - Search room by number
+ *  - Persistent storage using a binary file "hotel_reservation.dat"
+ *
+ * Compile: gcc hotel_reservation_system.c -o hotel_reservation_system
+ * Run: ./hotel_reservation_system
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define DATAFILE "hotel_reservation.dat"
+
+typedef struct {
+    int room_no;
+    char type[32];      // e.g., Single, Double, Deluxe
+    int price;
+    int is_booked;      // 0 = available, 1 = booked
+    char cust_name[64];
+    char cust_phone[20];
+} Room;
+
+void clear_input() {
+    int c;
+    while ((c = getchar()) != '\n' && c != EOF) {}
+}
+
+FILE* open_datafile(const char *mode) {
+    FILE *fp = fopen(DATAFILE, mode);
+    if (!fp && (mode[0] == 'r')) {
+        // Create file if it doesn't exist yet
+        fp = fopen(DATAFILE, "wb+");
+    }
+    return fp;
+}
+
+void add_room() {
+    FILE *fp = open_datafile("ab");
+    if (!fp) {
+        printf("Error opening data file.\n");
+        return;
+    }
+
+    Room r;
+    printf("Enter room number: ");
+    if (scanf("%d", &r.room_no) != 1) { clear_input(); printf("Invalid input.\n"); fclose(fp); return; }
+    clear_input();
+
+    printf("Enter room type (Single/Double/Deluxe): ");
+    fgets(r.type, sizeof(r.type), stdin);
+    r.type[strcspn(r.type, "\n")] = 0;
+
+    printf("Enter price per night: ");
+    if (scanf("%d", &r.price) != 1) { clear_input(); printf("Invalid input.\n"); fclose(fp); return; }
+    clear_input();
+
+    r.is_booked = 0;
+    r.cust_name[0] = '\0';
+    r.cust_phone[0] = '\0';
+
+    fwrite(&r, sizeof(Room), 1, fp);
+    fclose(fp);
+    printf("Room added successfully.\n");
+}
+
+void view_all_rooms() {
+    FILE *fp = open_datafile("rb");
+    if (!fp) { printf("No rooms found.\n"); return; }
+
+    Room r;
+    printf("All rooms:\n");
+    printf("---------------------------------------------------------------\n");
+    printf("| %-8s | %-10s | %-8s | %-10s | %-12s |\n", "RoomNo", "Type", "Price", "Status", "Cust Phone");
+    printf("---------------------------------------------------------------\n");
+    while (fread(&r, sizeof(Room), 1, fp) == 1) {
+        printf("| %-8d | %-10s | %-8d | %-10s | %-12s |\n",
+               r.room_no, r.type, r.price, r.is_booked ? "Booked" : "Available",
+               r.is_booked ? r.cust_phone : "-");
+    }
+    printf("---------------------------------------------------------------\n");
+    fclose(fp);
+}
+
+long find_room_offset(FILE *fp, int room_no) {
+    rewind(fp);
+    Room r;
+    long offset = 0;
+    while (fread(&r, sizeof(Room), 1, fp) == 1) {
+        if (r.room_no == room_no) {
+            // position returns index, offset in bytes
+            return offset;
+        }
+        offset += sizeof(Room);
+    }
+    return -1;
+}
+
+void book_room() {
+    FILE *fp = open_datafile("rb+");
+    if (!fp) { printf("No rooms available to book.\n"); return; }
+
+    int rn;
+    printf("Enter room number to book: ");
+    if (scanf("%d", &rn) != 1) { clear_input(); printf("Invalid input.\n"); fclose(fp); return; }
+    clear_input();
+
+    long off = find_room_offset(fp, rn);
+    if (off == -1) {
+        printf("Room %d not found.\n", rn);
+        fclose(fp);
+        return;
+    }
+
+    fseek(fp, off, SEEK_SET);
+    Room r;
+    fread(&r, sizeof(Room), 1, fp);
+    if (r.is_booked) {
+        printf("Room %d is already booked by %s (%s).\n", r.room_no, r.cust_name, r.cust_phone);
+        fclose(fp);
+        return;
+    }
+
+    printf("Enter customer name: ");
+    fgets(r.cust_name, sizeof(r.cust_name), stdin);
+    r.cust_name[strcspn(r.cust_name, "\n")] = 0;
+
+    printf("Enter customer phone: ");
+    fgets(r.cust_phone, sizeof(r.cust_phone), stdin);
+    r.cust_phone[strcspn(r.cust_phone, "\n")] = 0;
+
+    r.is_booked = 1;
+
+    fseek(fp, off, SEEK_SET);
+    fwrite(&r, sizeof(Room), 1, fp);
+    fflush(fp);
+    fclose(fp);
+
+    printf("Room %d successfully booked for %s.\n", r.room_no, r.cust_name);
+}
+
+void cancel_booking() {
+    FILE *fp = open_datafile("rb+");
+    if (!fp) { printf("No data file.\n"); return; }
+
+    int rn;
+    printf("Enter room number to cancel booking: ");
+    if (scanf("%d", &rn) != 1) { clear_input(); printf("Invalid input.\n"); fclose(fp); return; }
+    clear_input();
+
+    long off = find_room_offset(fp, rn);
+    if (off == -1) {
+        printf("Room %d not found.\n", rn);
+        fclose(fp);
+        return;
+    }
+
+    fseek(fp, off, SEEK_SET);
+    Room r;
+    fread(&r, sizeof(Room), 1, fp);
+
+    if (!r.is_booked) {
+        printf("Room %d is not currently booked.\n", rn);
+        fclose(fp);
+        return;
+    }
+
+    r.is_booked = 0;
+    r.cust_name[0] = '\0';
+    r.cust_phone[0] = '\0';
+
+    fseek(fp, off, SEEK_SET);
+    fwrite(&r, sizeof(Room), 1, fp);
+    fflush(fp);
+    fclose(fp);
+    printf("Booking for room %d has been cancelled.\n", rn);
+}
+
+void view_booked_rooms() {
+    FILE *fp = open_datafile("rb");
+    if (!fp) { printf("No rooms found.\n"); return; }
+
+    Room r;
+    int found = 0;
+    printf("Booked rooms:\n");
+    printf("-------------------------------------------------------\n");
+    printf("| %-8s | %-20s | %-12s |\n", "RoomNo", "Customer Name", "Phone");
+    printf("-------------------------------------------------------\n");
+    while (fread(&r, sizeof(Room), 1, fp) == 1) {
+        if (r.is_booked) {
+            found = 1;
+            printf("| %-8d | %-20s | %-12s |\n", r.room_no, r.cust_name, r.cust_phone);
+        }
+    }
+    if (!found) printf("No booked rooms.\n");
+    printf("-------------------------------------------------------\n");
+    fclose(fp);
+}
+
+void search_room() {
+    FILE *fp = open_datafile("rb");
+    if (!fp) { printf("No rooms found.\n"); return; }
+
+    int rn;
+    printf("Enter room number to search: ");
+    if (scanf("%d", &rn) != 1) { clear_input(); printf("Invalid input.\n"); fclose(fp); return; }
+    clear_input();
+
+    Room r;
+    int found = 0;
+    while (fread(&r, sizeof(Room), 1, fp) == 1) {
+        if (r.room_no == rn) {
+            found = 1;
+            printf("Room %d details:\n", r.room_no);
+            printf("  Type : %s\n", r.type);
+            printf("  Price: %d\n", r.price);
+            printf("  Status: %s\n", r.is_booked ? "Booked" : "Available");
+            if (r.is_booked) {
+                printf("  Customer: %s\n", r.cust_name);
+                printf("  Phone   : %s\n", r.cust_phone);
+            }
+            break;
+        }
+    }
+    if (!found) printf("Room %d not found.\n", rn);
+    fclose(fp);
+}
+
+void admin_menu() {
+    while (1) {
+        printf("\n--- Admin Menu ---\n");
+        printf("1. Add room\n");
+        printf("2. View all rooms\n");
+        printf("3. Search room\n");
+        printf("4. Back to main menu\n");
+        printf("Choice: ");
+        int ch;
+        if (scanf("%d", &ch) != 1) { clear_input(); printf("Invalid input.\n"); continue; }
+        clear_input();
+        switch (ch) {
+            case 1: add_room(); break;
+            case 2: view_all_rooms(); break;
+            case 3: search_room(); break;
+            case 4: return;
+            default: printf("Invalid choice.\n");
+        }
+    }
+}
+
+int main() {
+    int choice;
+    printf("=== Hotel Reservation System ===\n");
+    while (1) {
+        printf("\nMain Menu:\n");
+        printf("1. Admin Menu (add/view/search rooms)\n");
+        printf("2. Book a room\n");
+        printf("3. Cancel booking\n");
+        printf("4. View booked rooms\n");
+        printf("5. View all rooms\n");
+        printf("6. Exit\n");
+        printf("Enter choice: ");
+        if (scanf(\"%d\", &choice) != 1) { clear_input(); printf(\"Invalid input. Try again.\\n\"); continue; }
+        clear_input();
+        switch (choice) {
+            case 1: admin_menu(); break;
+            case 2: book_room(); break;
+            case 3: cancel_booking(); break;
+            case 4: view_booked_rooms(); break;
+            case 5: view_all_rooms(); break;
+            case 6: printf(\"Goodbye!\\n\"); exit(0);
+            default: printf(\"Invalid option.\\n\"); break;
+        }
+    }
+    return 0;
+}
